@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/joho/godotenv"
 	"io"
 	"log"
 	"net/http"
@@ -19,17 +20,15 @@ type Manager struct {
 	LoggedIn bool
 }
 
-const (
-	envAPI = "TELEGRAM_API_TOKEN"
-	token  = "6097626946:AAF1kI7cFt2nLhxom_CSs-98lEhBdRBRJwY"
-)
-
 const layout = "2006-01-02"
 
 func main() {
-	os.Setenv(envAPI, token) // todo: debug only
+	err := godotenv.Load(".env")
+	if err != nil {
+		panic(err)
+	}
 
-	bot, err := tgbotapi.NewBotAPI(os.Getenv(envAPI))
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_API_TOKEN"))
 	if err != nil {
 		log.Panic(err)
 	}
@@ -47,6 +46,24 @@ func main() {
 	var manager *Manager
 
 	var start, end *time.Time
+
+	// todo: add source
+	vehicles := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("Enterprise #1", "e 1"),
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #2", "v 2"),
+
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #1", "v 1"),
+		tgbotapi.NewInlineKeyboardButtonData("Enterprise #2", "e 2"),
+
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #3", "v 3"),
+		tgbotapi.NewInlineKeyboardButtonData("Enterprise #3", "e 3"),
+
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #4", "v 4"),
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #5", "v 5"),
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #6", "v 6"),
+		tgbotapi.NewInlineKeyboardButtonData("Vehicle #7", "v 7"),
+	}
+
 	for update := range updates {
 		if update.Message == nil && update.CallbackQuery == nil {
 			continue
@@ -131,11 +148,13 @@ func main() {
 			case strings.HasPrefix(data, "next_"):
 				page, _ := strconv.Atoi(strings.TrimPrefix(data, "next_"))
 				page++
-				updatePagination(bot, chatID, page, update.CallbackQuery.Message.MessageID)
+				updatePagination(bot, chatID, vehicles,
+					page, update.CallbackQuery.Message.MessageID)
 			case strings.HasPrefix(data, "prev_"):
 				page, _ := strconv.Atoi(strings.TrimPrefix(data, "prev_"))
 				page--
-				updatePagination(bot, chatID, page, update.CallbackQuery.Message.MessageID)
+				updatePagination(bot, chatID, vehicles,
+					page, update.CallbackQuery.Message.MessageID)
 
 			default:
 				switch {
@@ -182,9 +201,16 @@ func main() {
 						continue
 					}
 
-					sendToChat(chatID,
-						fmt.Sprintf("Enterprise %d mileage during %s-%s is %v km",
-							enterpriseID, v, start.Format(layout), end.Format(layout)), bot)
+					msg := ""
+					if fmt.Sprintf("%v", v) == "0" {
+						msg = fmt.Sprintf("Enterprise #%d mileage during %s-%s wasn't calculate. Not enough data.",
+							enterpriseID, start.Format(layout), end.Format(layout))
+					} else {
+						msg = fmt.Sprintf("Enterprise #%d mileage during %s-%s is %v km!",
+							enterpriseID, start.Format(layout), end.Format(layout), v)
+					}
+
+					sendToChat(chatID, msg, bot)
 
 					resp.Body.Close()
 				}
@@ -257,7 +283,7 @@ func main() {
 
 				start, end = parseDate(update.Message.Text)
 				if start != nil && end != nil {
-					showKeyboardReportsKind(chatID, bot)
+					showKeyboardReportsKind(chatID, bot, vehicles)
 					continue
 				}
 
@@ -267,7 +293,8 @@ func main() {
 	}
 }
 
-func showKeyboardReportsKind(chatID int64, bot *tgbotapi.BotAPI) {
+func showKeyboardReportsKind(chatID int64, bot *tgbotapi.BotAPI,
+	src []tgbotapi.InlineKeyboardButton) {
 	//inlineKeyboard := tgbotapi.NewInlineKeyboardMarkup(
 	//	tgbotapi.NewInlineKeyboardRow(
 	//		tgbotapi.NewInlineKeyboardButtonData("Vehicle #1", "v 1"),
@@ -281,15 +308,7 @@ func showKeyboardReportsKind(chatID int64, bot *tgbotapi.BotAPI) {
 	//	),
 	//)
 
-	inlineKeyboard := createPaginationKeyboard([]tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #1", "v 1"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #2", "v 2"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #3", "v 3"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #4", "v 4"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #5", "v 5"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #6", "v 6"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #7", "v 7"),
-	}, 1)
+	inlineKeyboard := createPaginationKeyboard(src, 1)
 
 	msg := tgbotapi.NewMessage(chatID, "What kind of report do you want?")
 	msg.ReplyMarkup = inlineKeyboard
@@ -298,22 +317,13 @@ func showKeyboardReportsKind(chatID int64, bot *tgbotapi.BotAPI) {
 
 func createPaginationKeyboard(buttons []tgbotapi.InlineKeyboardButton, currentPage int) tgbotapi.InlineKeyboardMarkup {
 	perPage := 3
-	startIndex := (currentPage - 1) * perPage
-	endIndex := startIndex + perPage
 
 	// Calculate the maximum number of pages based on the buttons count
-	maxPages := (len(buttons) + perPage - 1) / perPage
-
-	// Ensure currentPage is within valid range
-	if currentPage < 1 {
-		currentPage = 1
-	} else if currentPage > maxPages {
-		currentPage = maxPages
-	}
+	morePages := (len(buttons) + perPage - 1) / perPage
 
 	// Create keyboard rows for the current page
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for i := startIndex; i < endIndex && i < len(buttons); i++ {
+	for i := 0; i < perPage && i < len(buttons); i++ {
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(buttons[i].Text, *buttons[i].CallbackData),
 		})
@@ -324,7 +334,7 @@ func createPaginationKeyboard(buttons []tgbotapi.InlineKeyboardButton, currentPa
 	if currentPage > 1 {
 		paginationRow = append(paginationRow, tgbotapi.NewInlineKeyboardButtonData("Previous", fmt.Sprintf("prev_%d", currentPage)))
 	}
-	if currentPage < maxPages {
+	if morePages > 1 {
 		paginationRow = append(paginationRow, tgbotapi.NewInlineKeyboardButtonData("Next", fmt.Sprintf("next_%d", currentPage)))
 	}
 	rows = append(rows, paginationRow)
@@ -332,15 +342,13 @@ func createPaginationKeyboard(buttons []tgbotapi.InlineKeyboardButton, currentPa
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-func updatePagination(bot *tgbotapi.BotAPI, chatID int64, page, messageID int) {
-	// Generate buttons and create the pagination keyboard
-	buttons := []tgbotapi.InlineKeyboardButton{
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #4", "v 4"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #5", "v 5"),
-		tgbotapi.NewInlineKeyboardButtonData("Vehicle #6", "v 6"),
-	}
+func updatePagination(bot *tgbotapi.BotAPI, chatID int64,
+	src []tgbotapi.InlineKeyboardButton,
+	page, messageID int) {
 
-	keyboard := createPaginationKeyboard(buttons, page)
+	i := len(src) - 1 - (page-1)*3 // todo: add constant of max on page
+
+	keyboard := createPaginationKeyboard(src[i:], page)
 
 	// Edit the existing message to update the keyboard
 	editMsg := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, keyboard)

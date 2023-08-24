@@ -1,0 +1,9 @@
+version: '3'
+services:
+  app:
+    build:
+      context: .
+    environment:
+      TELEGRAM_API_TOKEN: 6097626946:AAF1kI7cFt2nLhxom_CSs-98lEhBdRBRJwY
+    ports:
+      - "7070:7070"
